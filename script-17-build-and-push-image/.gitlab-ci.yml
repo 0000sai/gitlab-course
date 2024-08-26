@@ -1,0 +1,45 @@
+workflow:
+  rules:
+    - if: $CI_COMMIT_BRANCH != "main" && $CI_PIPELINE_SOURCE != "merge_request_event"
+      when: never
+    - when: always 
+
+stages:
+  - test
+  - build
+
+run_unit_test:
+  stage: test
+  image: node:latest
+  tags:
+    - docker
+  before_script:
+    - cd app
+    - npm install
+  script:
+    - npm test
+  artifacts:
+    when: always
+    paths:
+      - app/junit.xml
+    reports:
+      junit: app/junit.xml
+
+build_image:
+  stage: build
+  tags:
+    - docker
+  # image: docker:27.1.2
+  script:
+    - docker build -t registry.gitlab.com/seunayolu/nodeapp-gitlabcicd:1.0 .
+
+push_image:
+  stage: build
+  needs:
+    - build_image
+  tags:
+    - docker
+  before_script:
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD registry.gitlab.com
+  script:
+    - docker push registry.gitlab.com/seunayolu/nodeapp-gitlabcicd:1.0
