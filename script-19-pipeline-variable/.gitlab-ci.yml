@@ -1,0 +1,48 @@
+workflow:
+  rules:
+    - if: $CI_COMMIT_BRANCH != "main" && $CI_PIPELINE_SOURCE != "merge_request_event"
+      when: never
+    - when: always 
+variables:
+  IMAGE_NAME: $CI_REGISTRY_IMAGE/microservice/$MICRO_SERVICE
+  IMAGE_TAG: "1.1"
+stages:
+  - test
+  - build
+
+run_unit_test:
+  stage: test
+  image: node:latest
+  tags:
+    - docker
+  before_script:
+    - cd app
+    - npm install
+  script:
+    - npm test
+  artifacts:
+    when: always
+    paths:
+      - app/junit.xml
+    reports:
+      junit: app/junit.xml
+
+build_image:
+  stage: build
+  tags:
+    - docker
+  script:
+    - docker build -t $IMAGE_NAME:$IMAGE_TAG .
+
+push_image:
+  stage: build
+  needs:
+    - build_image
+  tags:
+    - docker
+  before_script:
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+  script:
+    - docker push $IMAGE_NAME:$IMAGE_TAG
+  after_script:
+    - docker system prune -af

@@ -1,0 +1,48 @@
+workflow:
+  rules:
+    - if: $CI_COMMIT_BRANCH != "main" && $CI_PIPELINE_SOURCE != "merge_request_event"
+      when: never
+    - when: always 
+
+stages:
+  - test
+  - build
+
+run_unit_test:
+  stage: test
+  image: node:latest
+  tags:
+    - docker
+  before_script:
+    - cd app
+    - npm install
+  script:
+    - npm test
+  artifacts:
+    when: always
+    paths:
+      - app/junit.xml
+    reports:
+      junit: app/junit.xml
+
+build_image:
+  stage: build
+  tags:
+    - docker
+  # image: docker:27.1.2
+  script:
+    - docker build -t $CI_REGISTRY_IMAGE:1.0 .
+
+push_image:
+  stage: build
+  needs:
+    - build_image
+  tags:
+    - docker
+  before_script:
+    - echo "Docker registry url is $CI_REGISTRY"
+    - echo "Docker registry username is $CI_REGISTRY_USER"
+    - echo "Docker image repo is $CI_REGISTRY_IMAGE"
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+  script:
+    - docker push $CI_REGISTRY_IMAGE:1.0
