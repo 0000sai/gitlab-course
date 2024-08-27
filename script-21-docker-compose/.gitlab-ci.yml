@@ -59,10 +59,12 @@ deploy_to_dev:
     - push_image
   before_script:
     - chmod 400 $SSH_PRIVATE_KEY
+    - scp -o StrictHostKeyChecking=no -i $SSH_PRIVATE_KEY ./docker-compose.yml ubuntu@$DEV_SERVER_HOST:/home/ubuntu
   script:
     - ssh -o StrictHostKeyChecking=no -i $SSH_PRIVATE_KEY ubuntu@$DEV_SERVER_HOST "
         docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY &&
-        docker run -d -p 3000:3000 $IMAGE_NAME:$IMAGE_TAG"
+        docker compose -f docker-compose.yml down &&
+        docker compose -f docker-compose.yml up -d"
   environment:
     name: development
     url: $DEV_ENDPOINT
