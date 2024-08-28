@@ -1,0 +1,136 @@
+workflow:
+  rules:
+    - if: $CI_COMMIT_BRANCH != "main" && $CI_PIPELINE_SOURCE != "merge_request_event"
+      when: never
+    - when: always 
+variables:
+  IMAGE_NAME: $CI_REGISTRY_IMAGE
+  DEV_SERVER_HOST: "3.227.22.13"
+  DEV_ENDPOINT: "http://ec2-3-227-22-13.compute-1.amazonaws.com:3000"
+  STAGING_SERVER_HOST: "3.227.22.13"
+  STAGING_ENDPOINT: "http://ec2-3-227-22-13.compute-1.amazonaws.com:4000"
+  PROD_SERVER_HOST: "3.227.22.13"
+  PROD_ENDPOINT: "http://ec2-3-227-22-13.compute-1.amazonaws.com:5000"
+
+stages:
+  - test
+  - build
+  - deploy_dev
+  - deploy_staging
+  - deploy_prod
+
+run_unit_test:
+  stage: test
+  image: node:latest
+  cache:
+    key: "$CI_COMMIT_REF_NAME"
+    paths:
+      - app/node_modules
+  tags:
+    - docker
+  before_script:
+    - cd app
+    - npm install
+  script:
+    - npm test
+  artifacts:
+    when: always
+    paths:
+      - app/junit.xml
+    reports:
+      junit: app/junit.xml
+
+build_image:
+  stage: build
+  tags:
+    - docker
+  before_script:
+    - apk add --no-cache jq
+    - jq --version
+    - export APP_VERSION=$(cat app/package.json | jq -r .version)
+    - export VERSION=$APP_VERSION.$CI_PIPELINE_IID
+    - echo "VERSION=$VERSION"  >> build.env
+  script:
+    - docker build -t $IMAGE_NAME:$VERSION .
+
+  artifacts:
+    reports:
+      dotenv: build.env
+
+push_image:
+  stage: build
+  needs:
+    - build_image
+  tags:
+    - docker
+  before_script:
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+  script:
+    - docker push $IMAGE_NAME:$VERSION
+  after_script:
+    - docker system prune -af
+
+.deploy:
+  tags:
+    - docker
+  before_script:
+    - chmod 400 $SSH_PRIVATE_KEY
+    - scp -o StrictHostKeyChecking=no -i $SSH_PRIVATE_KEY ./docker-compose.yml ubuntu@$SERVER_HOST:/home/ubuntu
+  variables:
+    SSH_KEY: ""
+    SERVER_HOST: ""
+    DEPLOY_ENV: ""
+    APP_PORT: ""
+    ENDPOINT: ""
+  script:
+    - ssh -o StrictHostKeyChecking=no -i $SSH_PRIVATE_KEY ubuntu@$SERVER_HOST "
+        docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY &&
+
+        export COMPOSE_PROJECT_NAME=$DEPLOY_ENV
+        export DC_IMAGE_NAME=$IMAGE_NAME &&
+        export DC_IMAGE_TAG=$VERSION &&
+        export DC_APP_PORT=$APP_PORT &&
+
+        docker compose down &&
+        docker compose up -d"
+  environment:
+    name: $DEPLOY_ENV
+    url: $ENDPOINT
+
+deploy_to_dev:
+  stage: deploy_dev
+  extends: .deploy
+  variables:
+    SSH_KEY: $SSH_PRIVATE_KEY
+    SERVER_HOST: $DEV_SERVER_HOST
+    DEPLOY_ENV: development
+    APP_PORT: 3000
+    ENDPOINT: $DEV_ENDPOINT
+
+deploy_to_staging:
+  stage: deploy_staging
+  extends: .deploy
+  variables:
+    SSH_KEY: $SSH_PRIVATE_KEY
+    SERVER_HOST: $STAGING_SERVER_HOST
+    DEPLOY_ENV: staging
+    APP_PORT: 4000
+    ENDPOINT: $STAGING_ENDPOINT
+
+run_performance_test:
+  stage: deploy_staging
+  needs:
+    - deploy_to_staging
+  script:
+    - echo "running performance testing"
+
+deploy_to_prod:
+  stage: deploy_prod
+  extends: .deploy
+  variables:
+    SSH_KEY: $SSH_PRIVATE_KEY
+    SERVER_HOST: $PROD_SERVER_HOST
+    DEPLOY_ENV: production
+    APP_PORT: 5000
+    ENDPOINT: $PROD_ENDPOINT
+  when: manual
