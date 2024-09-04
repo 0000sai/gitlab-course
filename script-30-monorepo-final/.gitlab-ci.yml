@@ -1,0 +1,117 @@
+workflow:
+  rules:
+    - if: $CI_COMMIT_BRANCH != "main" && $CI_PIPELINE_SOURCE != "merge_request_event"
+      when: never
+    - when: always 
+
+variables:
+  SERVER_HOST: "34.233.71.73"
+  APP_ENDPOINT: "http://ec2-34-233-71-73.compute-1.amazonaws.com"
+
+stages:
+  - build
+  - deploy
+
+.build:
+  stage: build
+  tags:
+    - docker
+  variables:
+    MICRO_SERVICE: ""
+  before_script:
+    - cd $MICRO_SERVICE
+    - apk add --no-cache jq
+    - jq --version
+    - export APP_VERSION=$(cat package.json | jq -r .version)
+    - export VERSION=$APP_VERSION.$CI_PIPELINE_IID
+    - export IMAGE_NAME=$CI_REGISTRY_IMAGE/microservice/$MICRO_SERVICE
+    - echo $VERSION > version.txt  # Save the VERSION to a file
+  script:
+    - echo $CI_REGISTRY_PASSWORD | docker login -u $CI_REGISTRY_USER --password-stdin $CI_REGISTRY
+    - docker build -t $IMAGE_NAME:$VERSION .
+    - docker push $IMAGE_NAME:$VERSION
+  artifacts:
+    paths:
+      - $MICRO_SERVICE/version.txt  # Store the version.txt file as an artifact
+
+build_frontend:
+  extends: .build
+  variables:
+    MICRO_SERVICE: frontend
+  only:
+    changes:
+      - "frontend/**/*"
+
+build_products:
+  extends: .build
+  variables:
+    MICRO_SERVICE: products
+  only:
+    changes:
+      - "products/**/*"
+
+build_shopping-cart:
+  extends: .build
+  variables:
+    MICRO_SERVICE: shopping-cart
+  only:
+    changes:
+      - "shopping-cart/**/*"
+
+.deploy:
+  stage: deploy
+  tags:
+    - docker
+  variables:
+    MICRO_SERVICE: ""
+    APP_PORT: ""
+  before_script:
+    - export IMAGE_NAME=$CI_REGISTRY_IMAGE/microservice/$MICRO_SERVICE
+    - export VERSION=$(cat $MICRO_SERVICE/version.txt)
+    - export IMAGE_TAG=$VERSION
+    - echo $IMAGE_TAG
+    - chmod 400 $SSH_PRIVATE_KEY
+  script:
+    - scp -o StrictHostKeyChecking=no -i $SSH_PRIVATE_KEY ./docker-compose.yml ubuntu@$SERVER_HOST:/home/ubuntu
+    - ssh -o StrictHostKeyChecking=no -i $SSH_PRIVATE_KEY ubuntu@$SERVER_HOST "
+      echo $CI_REGISTRY_PASSWORD | docker login -u $CI_REGISTRY_USER --password-stdin $CI_REGISTRY &&
+
+        export COMPOSE_PROJECT_NAME=$MICRO_SERVICE
+        export DC_IMAGE_NAME=$IMAGE_NAME &&
+        export DC_IMAGE_TAG=$IMAGE_TAG &&
+        export DC_APP_PORT=$APP_PORT &&
+
+        docker network create micro_service || true &&
+
+        docker compose down &&
+        docker compose up -d" 
+  environment:
+    name: development
+    url: $APP_ENDPOINT
+
+deploy_frontend:
+  extends: .deploy
+  variables:
+    MICRO_SERVICE: frontend
+    APP_PORT: 3000
+  only:
+    changes:
+      - "frontend/**/*"
+
+deploy_products:
+  extends: .deploy
+  variables:
+    MICRO_SERVICE: products
+    APP_PORT: 3001
+  only:
+    changes:
+      - "products/**/*"
+
+deploy_shopping_cart:
+  extends: .deploy
+  variables:
+    MICRO_SERVICE: shopping-cart
+    APP_PORT: 3002
+  only:
+    changes:
+      - "shopping-cart/**/*"

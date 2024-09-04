@@ -1,0 +1,51 @@
+workflow:
+  rules:
+    - if: $CI_COMMIT_BRANCH != "main" && $CI_PIPELINE_SOURCE != "merge_request_event"
+      when: never
+    - when: always 
+
+stages:
+  - build
+  - deploy
+
+.build:
+  stage: build
+  tags:
+    - docker
+  variables:
+    MICRO_SERVICE: ""
+  before_script:
+    - cd $MICRO_SERVICE
+    - apk add --no-cache jq
+    - jq --version
+    - export APP_VERSION=$(cat package.json | jq -r .version)
+    - export VERSION=$APP_VERSION.$CI_PIPELINE_IID
+    - export IMAGE_NAME=$CI_REGISTRY_IMAGE/microservice/$MICRO_SERVICE
+  script:
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+    - docker build -t $IMAGE_NAME:$VERSION .
+    - docker push $IMAGE_NAME:$VERSION 
+
+build_frontend:
+  extends: .build
+  variables:
+    MICRO_SERVICE: frontend
+  only:
+    changes:
+      - "frontend/**/*"
+
+build_products:
+  extends: .build
+  variables:
+    MICRO_SERVICE: products
+  only:
+    changes:
+      - "products/**/*"
+
+build_shopping-cart:
+  extends: .build
+  variables:
+    MICRO_SERVICE: shopping-cart
+  only:
+    changes:
+      - "shopping-cart/**/*"

@@ -1,0 +1,66 @@
+workflow:
+  rules:
+    - if: $CI_COMMIT_BRANCH != "main" && $CI_PIPELINE_SOURCE != "merge_request_event"
+      when: never
+    - when: always 
+
+stages:
+  - build
+  - deploy
+
+build_frontend:
+  stage: build
+  tags:
+    - docker
+  before_script:
+    - cd frontend
+    - apk add --no-cache jq
+    - jq --version
+    - export APP_VERSION=$(cat package.json | jq -r .version)
+    - export VERSION=$APP_VERSION.$CI_PIPELINE_IID
+    - export IMAGE_NAME=$CI_REGISTRY_IMAGE/microservice/frontend
+  script:
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+    - docker build -t $IMAGE_NAME:$VERSION .
+    - docker push $IMAGE_NAME:$VERSION 
+  only:
+    changes:
+      - "frontend/**/*"
+
+build_products:
+  stage: build
+  tags:
+    - docker
+  before_script:
+    - cd products
+    - apk add --no-cache jq
+    - jq --version
+    - export APP_VERSION=$(cat package.json | jq -r .version)
+    - export VERSION=$APP_VERSION.$CI_PIPELINE_IID
+    - export IMAGE_NAME=$CI_REGISTRY_IMAGE/microservice/products
+  script:
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+    - docker build -t $IMAGE_NAME:$VERSION .
+    - docker push $IMAGE_NAME:$VERSION 
+  only:
+    changes:
+      - "products/**/*"
+
+build_shopping-cart:
+  stage: build
+  tags:
+    - docker
+  before_script:
+    - cd shopping-cart
+    - apk add --no-cache jq
+    - jq --version
+    - export APP_VERSION=$(cat package.json | jq -r .version)
+    - export VERSION=$APP_VERSION.$CI_PIPELINE_IID
+    - export IMAGE_NAME=$CI_REGISTRY_IMAGE/microservice/shopping-cart
+  script:
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+    - docker build -t $IMAGE_NAME:$VERSION .
+    - docker push $IMAGE_NAME:$VERSION 
+  only:
+    changes:
+      - "shopping-cart/**/*"
